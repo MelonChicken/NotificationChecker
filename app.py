@@ -1,4 +1,4 @@
-from src.get_info import get_response_seoultechITM, Post, newest_post
+from src.get_info import get_response_seoultechITM, Post
 from src.discord_bot import InitialBot
 import discord
 from datetime import datetime, timezone, timedelta

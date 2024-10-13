@@ -54,6 +54,4 @@ def get_intial_info_seoultechITM(response, base_url):
         #  print(post_class.id, post_class.title, post_class.date, post_class.link[:10], post_class.content, sep="    ")
         posts_info.append(post_class)
     return posts_info
-
-newest_post, whole_post = get_response_seoultechITM()
 #  print(newest_post.id, newest_post.title, newest_post.date, newest_post.link[:10], newest_post.content, sep="    ")
