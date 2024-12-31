@@ -21,6 +21,7 @@ class InitialBot:
 
         #  Bot token, SERVER ID, CHANNEL ID
         self.script_path = script_path
+        self.setting_path = setting_path
         self.token = settings_toml["DISCORD"]["TOKEN"]
         self.guild_id = settings_toml["DISCORD"]["GUILD_ID"]
         self.channel_id = settings_toml["DISCORD"]["CHANNEL_ID"]

@@ -15,6 +15,9 @@ DISCORD_TOKEN = initialized_bot.token
 CHANNEL_IDS = initialized_bot.channel_id
 urls = initialized_bot.urls
 
+setting_toml = toml.load(initialized_bot.setting_path)
+
+
 @bot.event
 async def on_ready():
     sys.stdout.write('Login...\n')
@@ -27,28 +30,38 @@ async def on_ready():
         return
 
     sys.stdout.write(f"Channel ID LIST: {initialized_bot.channel_id}\n")
-    main_channel = bot.get_channel(initialized_bot.channel_id["MAIN"])
-    log_channel = bot.get_channel(initialized_bot.channel_id["LOG"])
+    channels_dict = initialized_bot.channel_id
+
+    main_channel = bot.get_channel(channels_dict["MAIN"])
+    log_channel = bot.get_channel(channels_dict["LOG"])
+    dev_channel = bot.get_channel(channels_dict["DEV"])
 
     if main_channel is None or log_channel is None:
         sys.stdout.write("Channel not found. Please check the channel IDs and ensure the bot has all access to it.")
         return
     else:
-        sys.stdout.write(f"Found channel: Main:{main_channel.name} / Log:{log_channel.name}\n")
+        channel_names = {key: bot.get_channel(channels_dict[key]).name for key,value in channels_dict.items()}
+        #sys.stdout.write(f"Found channel: Main:{main_channel.name} / Log:{log_channel.name}\n")
+        sys.stdout.write(f"Found channel: {channel_names}\n")
 
     await bot.change_presence(status=discord.Status.online, activity=discord.Game('Intellij로 개발'))
 
-    embed = discord.Embed(title="ITM notificator has been initialized.",
-                          description="Be PREPARED!",
-                          color=discord.Colour.from_rgb(0, 0, 128))
-    embed.set_author(name='ITM_NOTI')
-    embed.set_footer(text="seoultech ITM")
 
-    await main_channel.send(embed=embed)
+    if not setting_toml['DISCORD']['INITIALIZED_FLAG']:
+        embed = discord.Embed(title="NotificationChecker has been initialized.",
+                              description="Be PREPARED!",
+                              color=discord.Colour.from_rgb(0, 0, 128))
+        embed.set_author(name='NOTI_CHECK')
+        embed.set_footer(text="MLC")
 
-    kst = timezone(timedelta(hours=9))
-    current_time = datetime.now(kst)
-    await log_channel.send(f"##---|{current_time}|---**The_notification_bot_was_initialized**---## ")
+        await main_channel.send(embed=embed)
+
+        kst = timezone(timedelta(hours=9))
+        current_time = datetime.now(kst)
+        await log_channel.send(f"##---|{current_time}|---**The_notification_bot_was_initialized**---## ")
+        with open(initialized_bot.setting_path, "w") as f:
+            setting_toml['DISCORD']['INITIALIZED_FLAG'] = True
+            toml.dump(setting_toml, f)
 
     noti_checker.start(main_channel=main_channel, log_channel=log_channel)
 
@@ -65,7 +78,7 @@ async def noti_checker(main_channel, log_channel):
 
     # If there is no new notification on the ITM website
     if new_post.id == current_newest_post["ID"]:
-        await log_channel.send(f"##---|{current_time}|---**There_is_nothing_new_on_the_website**---## ")
+        await log_channel.send(f"[{current_time}]|There_is_nothing_new_on_the_website")
 
     else:
         posts = sorted(posts, key=lambda x : x.date, reverse=False)
@@ -82,9 +95,16 @@ async def noti_checker(main_channel, log_channel):
 
                 await main_channel.send(embed=embed)
 
-                await log_channel.send(f"##---**{current_time}**---The_latest_notification_has_been_updated_['{current_newest_post["ID"]}'->'{post.id}']---## ")
+                await log_channel.send(f"[{current_time}]|The_latest_notification_has_been_updated|['{current_newest_post["ID"]}'->'{post.id}']")
                 update_newest_post(post)
                 current_newest_post = {"ID": post.id, "DATE": post.date}
+
+
+@tasks.loop(hours=setting_toml['DISCORD']['UPDATE_PERIOD']*24)
+async def bot_update(dev_channel):
+    kst = timezone(timedelta(hours=9))
+    current_time = datetime.now(kst)
+    await dev_channel.send(f"[{current_time}]|Time_to_update_server\n- link: https://hub.weirdhost.xyz/server/5b031035")
 
 def update_newest_post(post: Post):
 
@@ -97,7 +117,6 @@ def update_newest_post(post: Post):
 
     with open(setting_path, 'w') as f:
         toml.dump(settings_toml, f)
-        f.close()
 
 # Run the bot
 if __name__ == "__main__":
