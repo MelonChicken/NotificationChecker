@@ -1,12 +1,12 @@
-from src.get_info import get_response_seoultechITM, Post
+from src.Util.util_seoultechITM import NotificationCheckerSeoultechITM, get_contentSeoultechITM
+from src.Util.util_seoultechJanghak import NotificationCheckerSeoultechJanghak, get_contentSeoultechJanghak
 from src.discord_bot import InitialBot
 import discord
 from datetime import datetime, timezone, timedelta
 from discord.ext import tasks
 import sys
-import os
+import asyncio
 import toml
-
 
 initialized_bot = InitialBot()
 bot = initialized_bot.bot
@@ -15,7 +15,8 @@ DISCORD_TOKEN = initialized_bot.token
 CHANNEL_IDS = initialized_bot.channel_id
 urls = initialized_bot.urls
 
-setting_toml = toml.load(initialized_bot.setting_path)
+settings_path = initialized_bot.setting_path
+settings_toml = toml.load(initialized_bot.setting_path)
 
 
 @bot.event
@@ -35,19 +36,20 @@ async def on_ready():
     main_channel = bot.get_channel(channels_dict["MAIN"])
     log_channel = bot.get_channel(channels_dict["LOG"])
     dev_channel = bot.get_channel(channels_dict["DEV"])
+    # test_content_ITM = get_contentSeoultechITM(url="https://itm.seoultech.ac.kr/bachelor_of_information/notice/?do=view&profboardidx=0&bnum=1947&bidx=553738&cate=7&allboard=false&nowpage=1")
+    # await dev_channel.send(f"{test_content_ITM}")
+
 
     if main_channel is None or log_channel is None:
         sys.stdout.write("Channel not found. Please check the channel IDs and ensure the bot has all access to it.")
         return
     else:
-        channel_names = {key: bot.get_channel(channels_dict[key]).name for key,value in channels_dict.items()}
-        #sys.stdout.write(f"Found channel: Main:{main_channel.name} / Log:{log_channel.name}\n")
+        channel_names = {key: bot.get_channel(channels_dict[key]).name for key, value in channels_dict.items()}
         sys.stdout.write(f"Found channel: {channel_names}\n")
 
     await bot.change_presence(status=discord.Status.online, activity=discord.Game('Intellij로 개발'))
 
-
-    if not setting_toml['DISCORD']['INITIALIZED_FLAG']:
+    if not settings_toml['DISCORD']['INITIALIZED_FLAG']:
         embed = discord.Embed(title="NotificationChecker has been initialized.",
                               description="Be PREPARED!",
                               color=discord.Colour.from_rgb(0, 0, 128))
@@ -59,64 +61,70 @@ async def on_ready():
         kst = timezone(timedelta(hours=9))
         current_time = datetime.now(kst)
         await log_channel.send(f"##---|{current_time}|---**The_notification_bot_was_initialized**---## ")
+
         with open(initialized_bot.setting_path, "w") as f:
-            setting_toml['DISCORD']['INITIALIZED_FLAG'] = True
-            toml.dump(setting_toml, f)
+            settings_toml['DISCORD']['INITIALIZED_FLAG'] = True
+            toml.dump(settings_toml, f)
 
     noti_checker.start(main_channel=main_channel, log_channel=log_channel)
 
+
 @tasks.loop(hours=1)
 async def noti_checker(main_channel, log_channel):
-    kst = timezone(timedelta(hours=9))
-    current_time = datetime.now(kst)
-    setting_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'res', 'config.toml'))
-    with open(setting_path, 'r') as f:
-        settings_toml = toml.load(f)
+    itm = NotificationCheckerSeoultechITM(settings_path=settings_path, settings_toml=settings_toml,
+                                          main_channel=main_channel, log_channel=log_channel)
+    janghak = NotificationCheckerSeoultechJanghak(settings_path=settings_path, settings_toml=settings_toml,
+                                                  main_channel=main_channel, log_channel=log_channel)
+    tasks = [itm.check(), janghak.check()]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    current_newest_post = settings_toml["CLIENT"]["NEWEST_POST"]
-    new_post, posts = get_response_seoultechITM()
-
-    # If there is no new notification on the ITM website
-    if new_post.id == current_newest_post["ID"]:
-        await log_channel.send(f"[{current_time}]|There_is_nothing_new_on_the_website")
-
-    else:
-        posts = sorted(posts, key=lambda x : x.date, reverse=False)
-        for post in posts:
-            if datetime.strptime(current_newest_post["DATE"], "%Y-%m-%d") <= datetime.strptime(post.date, "%Y-%m-%d") and not current_newest_post["ID"] == post.id:
-                # If the newest post which was just published is newer than the prior new post
-                embed = discord.Embed(title=f"[{post.id}] {post.title}...",
-                                      description=f"Link: {post.link}",
-                                      color=discord.Colour.from_rgb(0, 0, 128))
-
-                embed.set_author(name='Seoultech ITM')
-                embed.set_footer(text=f"New Notification by ITM")
+    for task_id, result in enumerate(results, start=1):
+        if result:
+            sys.stdout.write(f"Task {task_id} result: {result}\n")
+        else:
+            sys.stdout.write(f"Task {task_id} did not complete successfully\n")
 
 
-                await main_channel.send(embed=embed)
-
-                await log_channel.send(f"[{current_time}]|The_latest_notification_has_been_updated|['{current_newest_post["ID"]}'->'{post.id}']")
-                update_newest_post(post)
-                current_newest_post = {"ID": post.id, "DATE": post.date}
-
-
-@tasks.loop(hours=setting_toml['DISCORD']['UPDATE_PERIOD']*24)
+@tasks.loop(hours=settings_toml['DISCORD']['UPDATE_PERIOD'] * 24)
 async def bot_update(dev_channel):
     kst = timezone(timedelta(hours=9))
     current_time = datetime.now(kst)
     await dev_channel.send(f"[{current_time}]|Time_to_update_server\n- link: https://hub.weirdhost.xyz/server/5b031035")
 
-def update_newest_post(post: Post):
 
-    setting_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'res', 'config.toml'))
+@bot.command()
+async def check(ctx, website="N0"):
 
-    with open(setting_path, 'r') as f:
-        settings_toml = toml.load(f)
-    settings_toml["CLIENT"]["NEWEST_POST"]["ID"] = post.id
-    settings_toml["CLIENT"]["NEWEST_POST"]["DATE"] = post.date
+    if website == "N0":
+        await ctx.reply(f"[The following list is about websites and their commands that we are currently offer the service about.]\n\n"
+                        f"command : website description with link\n"
+                        f"1. itm : [Seoultech ITM Notification](https://itm.seoultech.ac.kr/bachelor_of_information/notice/)\n\n"
+                        f"2. janghak : [Seoultech Scholarship Notification](https://www.seoultech.ac.kr/service/info/janghak/)\n\n")
+    else:
+        kst = timezone(timedelta(hours=9))
+        current_time = datetime.now(kst)
 
-    with open(setting_path, 'w') as f:
-        toml.dump(settings_toml, f)
+        log_channel = bot.get_channel(initialized_bot.channel_id["LOG"])
+
+
+        if website == "itm":
+
+            newest_post = initialized_bot.newest_post["seoultechITM"]
+
+            await get_contentSeoultechJanghak(id=newest_post["ID"], target_channel=ctx.channel, log_channel=log_channel,
+                                              current_time=current_time,
+                                              url=newest_post["URL"])
+
+        elif website == "janghak":
+
+            newest_post = initialized_bot.newest_post["seoultechJanghak"]
+
+            await get_contentSeoultechJanghak(id=newest_post["ID"], target_channel=ctx.channel, log_channel=log_channel,
+                                                                 current_time=current_time,
+                                                                 url=newest_post["URL"])
+
+
+
 
 # Run the bot
 if __name__ == "__main__":
@@ -124,4 +132,4 @@ if __name__ == "__main__":
         bot.run(initialized_bot.token)
 
     except discord.errors.LoginFailure as e:
-        print("Improper token has been passed.")
+        sys.stdout.write("Improper token has been passed.")

@@ -48,8 +48,10 @@ try:
                 'CLIENT' : {
                     'URLS' : urls,
                     'NEWEST_POST' : {
-                        'ID' : 'J0724',
-                        'DATE' : '2003-07-24'
+                        'SITENAME' :{
+                            'ID' : 'J0724',
+                            'DATE' : '2003-07-24',
+                        },
                     }
                 },
                 'DISCORD' : {
