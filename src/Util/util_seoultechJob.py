@@ -141,7 +141,7 @@ async def get_newest_content_SeoultechJob(id: str, url: str,
             notification_title = notification_title[:20] + "..."
 
         if 100 < len(notification_content):
-            notification_content = notification_content[:99] + "\n...(see more)"
+            notification_content = notification_content[:99] + "\n\n...(see more)"
 
 
         embed = discord.Embed(title=f"[{id}]\n{notification_title}",
@@ -153,4 +153,4 @@ async def get_newest_content_SeoultechJob(id: str, url: str,
         embed.set_footer(text=f"Newest Post in the Seoultech Job")
 
         await target_channel.send(embed=embed)
-        await log_channel.send(f"[{current_time}]|The_latest_notification_in_the_Seoultech_Janghak_has_been_called|[{id}]")
+        await log_channel.send(f"[{current_time}]|The_latest_notification_in_the_Seoultech_Job_has_been_called|[{id}]")

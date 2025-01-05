@@ -1,6 +1,7 @@
 from src.Util.util_seoultechITM import NotificationCheckerSeoultechITM, get_newest_content_SeoultechITM
 from src.Util.util_seoultechJanghak import NotificationCheckerSeoultechJanghak, get_newest_content_SeoultechJanghak
 from src.Util.util_seoultechJob import NotificationCheckerSeoultechJob, get_newest_content_SeoultechJob
+from src.Util.util_seoultechContest import NotificationCheckerSeoultechContest, get_newest_content_SeoultechContest
 from src.discord_bot import InitialBot
 import discord
 from datetime import datetime, timezone, timedelta
@@ -73,12 +74,19 @@ async def on_ready():
 async def noti_checker(main_channel, log_channel):
     seoultech_itm = NotificationCheckerSeoultechITM(settings_path=settings_path, settings_toml=settings_toml,
                                           main_channel=main_channel, log_channel=log_channel)
+
     seoultech_janghak = NotificationCheckerSeoultechJanghak(settings_path=settings_path, settings_toml=settings_toml,
                                                   main_channel=main_channel, log_channel=log_channel)
+
     seoultech_job = NotificationCheckerSeoultechJob(settings_path=settings_path, settings_toml=settings_toml,
                                                   main_channel=main_channel, log_channel=log_channel)
-    tasks = [seoultech_itm.check(), seoultech_janghak.check(), seoultech_job.check()]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    seoultech_contest = NotificationCheckerSeoultechContest(settings_path=settings_path, settings_toml=settings_toml,
+                                                            main_channel=main_channel, log_channel=log_channel)
+
+    website_tasks = [seoultech_itm.check(), seoultech_janghak.check(), seoultech_job.check(), seoultech_contest.check()]
+
+    results = await asyncio.gather(*website_tasks, return_exceptions=True)
 
     for task_id, result in enumerate(results, start=1):
         if result:
@@ -135,6 +143,14 @@ async def check(ctx, website="N0"):
             await get_newest_content_SeoultechJob(id=newest_post["ID"], target_channel=ctx.channel, log_channel=log_channel,
                                                       current_time=current_time,
                                                       url=newest_post["URL"])
+
+        elif website == "contest":
+
+            newest_post = initialized_bot.newest_post["seoultechContest"]
+
+            await get_newest_content_SeoultechContest(id=newest_post["ID"], target_channel=ctx.channel, log_channel=log_channel,
+                                                  current_time=current_time,
+                                                  url=newest_post["URL"])
 
 
 # Run the bot

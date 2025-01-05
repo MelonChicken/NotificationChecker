@@ -142,7 +142,7 @@ async def get_newest_content_SeoultechJanghak(id: str, url: str,
             notification_title = notification_title[:20] + "..."
 
         if 100 < len(notification_content):
-            notification_content = notification_content[:99] + "\n...(see more)"
+            notification_content = notification_content[:99] + "\n\n...(see more)"
 
 
         embed = discord.Embed(title=f"[{id}]\n{notification_title}",
