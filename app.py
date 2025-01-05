@@ -110,7 +110,8 @@ async def check(ctx, website="N0"):
                         f"command : website description with link\n"
                         f"1. itm : [Seoultech ITM Notification](https://itm.seoultech.ac.kr/bachelor_of_information/notice/)\n\n"
                         f"2. janghak : [Seoultech Scholarship Notification](https://www.seoultech.ac.kr/service/info/janghak/)\n\n"
-                        f"3. job : [Seoultech Job Notification](https://www.seoultech.ac.kr/service/info/job/)\n\n")
+                        f"3. job : [Seoultech Job Notification](https://www.seoultech.ac.kr/service/info/job/)\n\n"
+                        f"4. contest : [Seoultech Job Notification](https://www.seoultech.ac.kr/service/board/rec/)\n\n")
     else:
         initialized_bot.sync_newest_posts()
 
