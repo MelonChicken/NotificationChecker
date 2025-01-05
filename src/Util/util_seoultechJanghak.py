@@ -60,7 +60,7 @@ class NotificationCheckerSeoultechJanghak:
                                               color=discord.Colour.from_rgb(226, 226, 226))
 
                         embed.set_author(name='Seoultech Janghak')
-                        embed.set_footer(text=f"New Notification by [{type(self).__name__[19:]}]")
+                        embed.set_footer(text=f"New Notification by {type(self).__name__[19:]}")
 
 
                         await main_channel.send(embed=embed)
@@ -122,8 +122,8 @@ def get_initial_info_seoultechJanghak(response, base_url):
         posts_info.append(post_class)
     return posts_info
 
-async def get_contentSeoultechJanghak(id: str, url: str,
-                                      target_channel, log_channel, current_time):
+async def get_newest_content_SeoultechJanghak(id: str, url: str,
+                                              target_channel, log_channel, current_time):
     response = requests.get(url)
     if response.status_code != 200:
         content = f"ResponseError[status_code: {response.status_code}]"

@@ -29,3 +29,14 @@ class InitialBot:
         self.urls = settings_toml["CLIENT"]["URLS"]
         self.newest_post = settings_toml["CLIENT"]["NEWEST_POST"]
         self.bot = commands.Bot(command_prefix=self.command_prefix, intents=intents)
+
+    def sync_newest_posts(self):
+
+        script_path = os.path.dirname(__file__)
+        setting_path = abspath(os.path.join(script_path, '..', 'res', 'config.toml'))
+
+        with open(setting_path, 'r') as f:
+            settings_toml = toml.load(f)
+        #  Bot token, SERVER ID, CHANNEL ID
+
+        self.newest_post = settings_toml["CLIENT"]["NEWEST_POST"]

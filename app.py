@@ -1,5 +1,6 @@
-from src.Util.util_seoultechITM import NotificationCheckerSeoultechITM, get_contentSeoultechITM
-from src.Util.util_seoultechJanghak import NotificationCheckerSeoultechJanghak, get_contentSeoultechJanghak
+from src.Util.util_seoultechITM import NotificationCheckerSeoultechITM, get_newest_content_SeoultechITM
+from src.Util.util_seoultechJanghak import NotificationCheckerSeoultechJanghak, get_newest_content_SeoultechJanghak
+from src.Util.util_seoultechJob import NotificationCheckerSeoultechJob, get_newest_content_SeoultechJob
 from src.discord_bot import InitialBot
 import discord
 from datetime import datetime, timezone, timedelta
@@ -28,7 +29,6 @@ async def on_ready():
     guild = discord.utils.get(bot.guilds, id=initialized_bot.guild_id)
     if guild is None:
         sys.stdout.write("Bot is not connected to the specified guild.")
-        return
 
     sys.stdout.write(f"Channel ID LIST: {initialized_bot.channel_id}\n")
     channels_dict = initialized_bot.channel_id
@@ -42,7 +42,7 @@ async def on_ready():
 
     if main_channel is None or log_channel is None:
         sys.stdout.write("Channel not found. Please check the channel IDs and ensure the bot has all access to it.")
-        return
+
     else:
         channel_names = {key: bot.get_channel(channels_dict[key]).name for key, value in channels_dict.items()}
         sys.stdout.write(f"Found channel: {channel_names}\n")
@@ -71,11 +71,13 @@ async def on_ready():
 
 @tasks.loop(hours=1)
 async def noti_checker(main_channel, log_channel):
-    itm = NotificationCheckerSeoultechITM(settings_path=settings_path, settings_toml=settings_toml,
+    seoultech_itm = NotificationCheckerSeoultechITM(settings_path=settings_path, settings_toml=settings_toml,
                                           main_channel=main_channel, log_channel=log_channel)
-    janghak = NotificationCheckerSeoultechJanghak(settings_path=settings_path, settings_toml=settings_toml,
+    seoultech_janghak = NotificationCheckerSeoultechJanghak(settings_path=settings_path, settings_toml=settings_toml,
                                                   main_channel=main_channel, log_channel=log_channel)
-    tasks = [itm.check(), janghak.check()]
+    seoultech_job = NotificationCheckerSeoultechJob(settings_path=settings_path, settings_toml=settings_toml,
+                                                  main_channel=main_channel, log_channel=log_channel)
+    tasks = [seoultech_itm.check(), seoultech_janghak.check(), seoultech_job.check()]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     for task_id, result in enumerate(results, start=1):
@@ -99,8 +101,11 @@ async def check(ctx, website="N0"):
         await ctx.reply(f"[The following list is about websites and their commands that we are currently offer the service about.]\n\n"
                         f"command : website description with link\n"
                         f"1. itm : [Seoultech ITM Notification](https://itm.seoultech.ac.kr/bachelor_of_information/notice/)\n\n"
-                        f"2. janghak : [Seoultech Scholarship Notification](https://www.seoultech.ac.kr/service/info/janghak/)\n\n")
+                        f"2. janghak : [Seoultech Scholarship Notification](https://www.seoultech.ac.kr/service/info/janghak/)\n\n"
+                        f"3. job : [Seoultech Job Notification](https://www.seoultech.ac.kr/service/info/job/)\n\n")
     else:
+        initialized_bot.sync_newest_posts()
+
         kst = timezone(timedelta(hours=9))
         current_time = datetime.now(kst)
 
@@ -111,19 +116,25 @@ async def check(ctx, website="N0"):
 
             newest_post = initialized_bot.newest_post["seoultechITM"]
 
-            await get_contentSeoultechJanghak(id=newest_post["ID"], target_channel=ctx.channel, log_channel=log_channel,
-                                              current_time=current_time,
-                                              url=newest_post["URL"])
+            await get_newest_content_SeoultechITM(id=newest_post["ID"], target_channel=ctx.channel, log_channel=log_channel,
+                                                  current_time=current_time,
+                                                  url=newest_post["URL"])
 
         elif website == "janghak":
 
             newest_post = initialized_bot.newest_post["seoultechJanghak"]
 
-            await get_contentSeoultechJanghak(id=newest_post["ID"], target_channel=ctx.channel, log_channel=log_channel,
-                                                                 current_time=current_time,
-                                                                 url=newest_post["URL"])
+            await get_newest_content_SeoultechJanghak(id=newest_post["ID"], target_channel=ctx.channel, log_channel=log_channel,
+                                                      current_time=current_time,
+                                                      url=newest_post["URL"])
 
+        elif website == "job":
 
+            newest_post = initialized_bot.newest_post["seoultechJob"]
+
+            await get_newest_content_SeoultechJob(id=newest_post["ID"], target_channel=ctx.channel, log_channel=log_channel,
+                                                      current_time=current_time,
+                                                      url=newest_post["URL"])
 
 
 # Run the bot
