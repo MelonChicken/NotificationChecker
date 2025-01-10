@@ -10,7 +10,7 @@ class InitialBot:
         script_path = os.path.dirname(__file__)
         setting_path = abspath(os.path.join(script_path, '..', 'res', 'config.toml'))
 
-        with open(setting_path, 'r') as f:
+        with open(setting_path, 'r', encoding="utf-8") as f:
             settings_toml = toml.load(f)
 
         # Set default intent for discord client
@@ -18,6 +18,7 @@ class InitialBot:
         intents.message_content = True
         intents.guilds = True
         intents.members = True
+        intents.reactions = True
 
         #  Bot token, SERVER ID, CHANNEL ID
         self.script_path = script_path
@@ -35,7 +36,7 @@ class InitialBot:
         script_path = os.path.dirname(__file__)
         setting_path = abspath(os.path.join(script_path, '..', 'res', 'config.toml'))
 
-        with open(setting_path, 'r') as f:
+        with open(setting_path, "r", encoding="utf-8") as f:
             settings_toml = toml.load(f)
         #  Bot token, SERVER ID, CHANNEL ID
 

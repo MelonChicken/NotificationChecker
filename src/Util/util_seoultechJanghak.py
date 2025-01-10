@@ -61,10 +61,9 @@ class NotificationCheckerSeoultechJanghak:
 
                         embed.set_author(name='Seoultech Janghak')
                         embed.set_footer(text=f"New Notification by {type(self).__name__[19:]}")
-
-
-                        await main_channel.send(embed=embed)
-
+                        message = await main_channel.send(embed=embed)
+                        check_emoji = settings_toml["DISCORD"]["EMOJIS"]["SAVE"][0]
+                        await message.add_reaction(check_emoji)
                         await log_channel.send(f"[{current_time}]|The_latest_notification_has_been_updated|['{current_newest_post["ID"]}'->'{post.id}']|[{type(self).__name__[19:]}]")
                         self.update_newest_post(post, settings_path=settings_path, settings_toml=settings_toml)
                         current_newest_post = {"ID": post.id, "DATE": post.date, "URL": post.link}
@@ -81,7 +80,7 @@ class NotificationCheckerSeoultechJanghak:
         settings_toml["CLIENT"]["NEWEST_POST"]["seoultechJanghak"]["DATE"] = post.date
         settings_toml["CLIENT"]["NEWEST_POST"]["seoultechJanghak"]["URL"] = post.link
 
-        with open(settings_path, 'w') as f:
+        with open(settings_path, 'w', encoding="utf-8") as f:
             toml.dump(settings_toml, f)
 
 
@@ -123,7 +122,8 @@ def get_initial_info_seoultechJanghak(response, base_url):
     return posts_info
 
 async def get_newest_content_SeoultechJanghak(id: str, url: str,
-                                              target_channel, log_channel, current_time):
+                                              target_channel, log_channel, current_time,
+                                              save_emoji):
     response = requests.get(url)
     if response.status_code != 200:
         content = f"ResponseError[status_code: {response.status_code}]"
@@ -153,7 +153,9 @@ async def get_newest_content_SeoultechJanghak(id: str, url: str,
         embed.set_author(name=f"{notification_author} [{notification_date}]")
         embed.set_footer(text=f"Newest Post in the Seoultech Janghak")
 
-        await target_channel.send(embed=embed)
+        message = await target_channel.send(embed=embed)
+        check_emoji = save_emoji
+        await message.add_reaction(check_emoji)
         await log_channel.send(f"[{current_time}]|The_latest_notification_in_the_Seoultech_Janghak_has_been_called|[{id}]")
 
 

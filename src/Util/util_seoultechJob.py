@@ -53,7 +53,7 @@ class NotificationCheckerSeoultechJob:
                 await log_channel.send(f"[{current_time}]|There_is_nothing_new_on_the_website|[{type(self).__name__[19:]}]")
 
             else:
-                posts = sorted(posts, key=lambda x : x.date, reverse=False)
+                posts = sorted(posts, key=lambda x : (x.date, x.id), reverse=False)
                 for post in posts:
                     if datetime.strptime(current_newest_post["DATE"], "%Y-%m-%d") <= datetime.strptime(post.date, "%Y-%m-%d") and not current_newest_post["ID"] == post.id:
                         # If the newest post which was just published is newer than the prior new post
@@ -63,9 +63,9 @@ class NotificationCheckerSeoultechJob:
 
                         embed.set_author(name='Seoultech Job')
                         embed.set_footer(text=f"New Notification by {type(self).__name__[19:]}")
-
-
-                        await main_channel.send(embed=embed)
+                        message = await main_channel.send(embed=embed)
+                        check_emoji = settings_toml["DISCORD"]["EMOJIS"]["SAVE"][0]
+                        await message.add_reaction(check_emoji)
                         await log_channel.send(f"[{current_time}]|The_latest_notification_has_been_updated|['{current_newest_post["ID"]}'->'{post.id}']|[{type(self).__name__[19:]}]")
 
                         self.update_newest_post(post, settings_path=settings_path, settings_toml=settings_toml)
@@ -83,7 +83,7 @@ class NotificationCheckerSeoultechJob:
         settings_toml["CLIENT"]["NEWEST_POST"]["seoultechJob"]["DATE"] = post.date
         settings_toml["CLIENT"]["NEWEST_POST"]["seoultechJob"]["URL"] = post.link
 
-        with open(settings_path, 'w') as f:
+        with open(settings_path, 'w', encoding="utf-8") as f:
             toml.dump(settings_toml, f)
 
 def get_response_seoultechJob(base_url = "https://www.seoultech.ac.kr/service/info/job/"):
@@ -120,7 +120,8 @@ def get_intial_info_seoultechJob(response, base_url):
     return posts_info
 
 async def get_newest_content_SeoultechJob(id: str, url: str,
-                                          target_channel, log_channel, current_time):
+                                          target_channel, log_channel, current_time,
+                                          save_emoji):
     response = requests.get(url)
 
     if response.status_code != 200:
@@ -152,5 +153,7 @@ async def get_newest_content_SeoultechJob(id: str, url: str,
         embed.set_author(name=f"{notification_author} [{notification_date}]")
         embed.set_footer(text=f"Newest Post in the Seoultech Job")
 
-        await target_channel.send(embed=embed)
+        message = await target_channel.send(embed=embed)
+        check_emoji = save_emoji
+        await message.add_reaction(check_emoji)
         await log_channel.send(f"[{current_time}]|The_latest_notification_in_the_Seoultech_Job_has_been_called|[{id}]")

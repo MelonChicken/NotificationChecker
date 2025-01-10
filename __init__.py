@@ -43,7 +43,7 @@ try:
 
 
     if not os.path.exists(toml_dir):
-        with open(toml_dir, "w") as f:
+        with open(toml_dir, "w", encoding="utf-8") as f:
             config_data = {
                 'CLIENT' : {
                     'URLS' : urls,

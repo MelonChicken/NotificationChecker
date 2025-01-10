@@ -37,9 +37,6 @@ async def on_ready():
     main_channel = bot.get_channel(channels_dict["MAIN"])
     log_channel = bot.get_channel(channels_dict["LOG"])
     dev_channel = bot.get_channel(channels_dict["DEV"])
-    # test_content_ITM = get_contentSeoultechITM(url="https://itm.seoultech.ac.kr/bachelor_of_information/notice/?do=view&profboardidx=0&bnum=1947&bidx=553738&cate=7&allboard=false&nowpage=1")
-    # await dev_channel.send(f"{test_content_ITM}")
-
 
     if main_channel is None or log_channel is None:
         sys.stdout.write("Channel not found. Please check the channel IDs and ensure the bot has all access to it.")
@@ -61,14 +58,75 @@ async def on_ready():
 
         kst = timezone(timedelta(hours=9))
         current_time = datetime.now(kst)
-        await log_channel.send(f"##---|{current_time}|---**The_notification_bot_was_initialized**---## ")
+        await log_channel.send(f"[{current_time}]|The_notification_bot_was_initialized ")
 
-        with open(initialized_bot.setting_path, "w") as f:
+        with open(initialized_bot.setting_path, "w", encoding="utf-8") as f:
             settings_toml['DISCORD']['INITIALIZED_FLAG'] = True
             toml.dump(settings_toml, f)
 
     noti_checker.start(main_channel=main_channel, log_channel=log_channel)
 
+@bot.event
+async def on_raw_reaction_add(payload):
+
+    current_time = datetime.now(timezone(timedelta(hours=9)))
+
+    #get the guild, channel, message, and user using their ID
+    guild = bot.get_guild(payload.guild_id)
+    channel = bot.get_channel(payload.channel_id)
+    user = guild.get_member(payload.user_id)
+
+    log_channel = bot.get_channel(CHANNEL_IDS["LOG"])
+
+    if channel is None:
+        return
+
+    try:
+        referenced_message = await channel.fetch_message(payload.message_id)
+
+    except discord.NotFound:
+        await log_channel.send(f"[{current_time}]|Discord_bot_cannot_fetch_message|{discord.NotFound}")
+        return
+
+    save_emojis = settings_toml["DISCORD"]["EMOJIS"]["SAVE"]
+
+    if user.bot:
+        return
+    if payload.emoji.name in save_emojis:
+
+        if referenced_message.content:
+            original_content = referenced_message.content
+
+            try:
+                await user.send(f"here is what you want! :\n {original_content}")
+                await log_channel.send(f"[{current_time}]|User[{user.name}-{user.id}]saved_the_message[msg_id-{referenced_message.id}]")
+
+            except discord.Forbidden:
+                await channel.send(f"{user.mention}, the bot cannot send the direct message to you."
+                                                    f"\n please check your direct message setting.")
+                await log_channel.send(f"[{current_time}]|User[{user.name}-{user.id}]forbidden_error_occured[msg_id-{referenced_message.id}]")
+
+        elif referenced_message.embeds:
+            embed_message = referenced_message.embeds[0]
+            embed = discord.Embed(title=embed_message.title,
+                                  description=embed_message.description,
+                                  url=embed_message.url,
+                                  color=embed_message.color)
+
+            embed.set_author(name=embed_message.author.name)
+            embed.set_footer(text=embed_message.footer.text)
+
+            try:
+                await user.send(embed=embed)
+                await log_channel.send(f"[{current_time}]|User[{user.name}-{user.id}]saved_the_message[msg_id-{referenced_message.id}]")
+
+            except discord.Forbidden:
+                await channel.send(f"{user.mention}, the bot cannot send the direct message to you."
+                                                    f"\n please check your direct message setting.")
+                await log_channel.send(f"[{current_time}]|User[{user.name}-{user.id}]forbidden_error_occured[msg_id-{referenced_message.id}]")
+
+    else:
+        await log_channel.send(f"[{current_time}]|User[{user.name}-{user.id}]reacted_with_unregisterd_emoji[emoji-{payload.emoji}]")
 
 @tasks.loop(hours=1)
 async def noti_checker(main_channel, log_channel):
@@ -127,7 +185,7 @@ async def check(ctx, website="N0"):
 
             await get_newest_content_SeoultechITM(id=newest_post["ID"], target_channel=ctx.channel, log_channel=log_channel,
                                                   current_time=current_time,
-                                                  url=newest_post["URL"])
+                                                  url=newest_post["URL"], save_emoji = settings_toml["DISCORD"]["EMOJIS"]["SAVE"][0])
 
         elif website == "janghak":
 
@@ -135,23 +193,24 @@ async def check(ctx, website="N0"):
 
             await get_newest_content_SeoultechJanghak(id=newest_post["ID"], target_channel=ctx.channel, log_channel=log_channel,
                                                       current_time=current_time,
-                                                      url=newest_post["URL"])
+                                                      url=newest_post["URL"], save_emoji = settings_toml["DISCORD"]["EMOJIS"]["SAVE"][0])
 
         elif website == "job":
 
             newest_post = initialized_bot.newest_post["seoultechJob"]
 
             await get_newest_content_SeoultechJob(id=newest_post["ID"], target_channel=ctx.channel, log_channel=log_channel,
-                                                      current_time=current_time,
-                                                      url=newest_post["URL"])
+                                                  current_time=current_time,
+                                                  url=newest_post["URL"], save_emoji = settings_toml["DISCORD"]["EMOJIS"]["SAVE"][0])
 
         elif website == "contest":
 
             newest_post = initialized_bot.newest_post["seoultechContest"]
 
             await get_newest_content_SeoultechContest(id=newest_post["ID"], target_channel=ctx.channel, log_channel=log_channel,
-                                                  current_time=current_time,
-                                                  url=newest_post["URL"])
+                                                      current_time=current_time,
+                                                      url=newest_post["URL"], save_emoji = settings_toml["DISCORD"]["EMOJIS"]["SAVE"][0])
+
 
 
 # Run the bot
