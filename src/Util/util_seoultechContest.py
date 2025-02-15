@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 import discord
 import toml
 
+from src.default.color_skeme import ColorTemplate
 
 
 class PostContest:
@@ -61,7 +62,7 @@ class NotificationCheckerSeoultechContest:
                         # If the newest post which was just published is newer than the prior new post
                         embed = discord.Embed(title=f"[{post.id}] {post.title}...",
                                               description=f"Link: {post.link}",
-                                              color=discord.Colour.from_rgb(141, 154, 141))
+                                              color=ColorTemplate.seoultech_contest)
 
                         embed.set_author(name='Seoultech Contest')
                         embed.set_footer(text=f"New Notification by {type(self).__name__[19:]}")
@@ -150,7 +151,7 @@ async def get_newest_content_SeoultechContest(id: str, url: str,
         embed = discord.Embed(title=f"[{id}]\n{notification_title}",
                               description=notification_content,
                               url=url,
-                              color=discord.Colour.from_rgb(226, 226, 226),)
+                              color=ColorTemplate.seoultech_contest,)
 
         embed.set_author(name=f"{notification_author} [{notification_date}]")
         embed.set_footer(text=f"Newest Post in the Seoultech Contest")
