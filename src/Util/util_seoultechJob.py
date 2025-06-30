@@ -1,9 +1,8 @@
-import sys
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime, timezone, timedelta
 import discord
-import toml
+
+from src.Util.notification_checker_base import NotificationCheckerBase
 
 
 class PostJob:
@@ -22,138 +21,116 @@ class PostJob:
         content_box = soup.find("table", "tbl_view").find("tbody").find("td", "cont").get_text().strip()
         self.content = content_box
 
+class SeoultechJobChecker(NotificationCheckerBase):
+    """
+    NotificationCheckerBase를 상속하여
+    서울과기대 Job 공지 전용으로 크롤링·알림 기능을 제공하는 클래스
+    """
+    def __init__(self, settings_path, settings_toml, main_channel, log_channel):
+        super().__init__(
+            category_key="seoultechJob",
+            base_url="https://www.seoultech.ac.kr/service/info/job/",
+            settings_path=settings_path,
+            settings_toml=settings_toml,
+            main_channel=main_channel,
+            log_channel=log_channel,
+            embed_color=discord.Colour.from_rgb(179, 182, 183),
+            embed_author="Seoultech Job"
+        )
 
-class NotificationCheckerSeoultechJob:
+    def get_latest_posts(self):
+        """
+        Job 공지 목록을 파싱하여 가장 최신 Post 객체와 전체 리스트를 반환
+        """
+        response = requests.get(self.base_url)
+        if response.status_code != 200:
+            return None, []
 
-    def __init__(self, settings_path, settings_toml,
-                 main_channel, log_channel,
-                 url="https://www.seoultech.ac.kr/service/info/job/"):
-
-        self.settings_path = settings_path
-        self.settings_toml = settings_toml
-        self.main_channel = main_channel
-        self.log_channel = log_channel
-        self.url = url
-
-    async def check(self):
-
-        settings_path = self.settings_path
-        settings_toml = self.settings_toml
-        main_channel =self.main_channel
-        log_channel = self.log_channel
-        current_time = datetime.now(timezone(timedelta(hours=9)))
-
-        try:
-            current_newest_post = settings_toml["CLIENT"]["NEWEST_POST"]["seoultechJob"]
-            new_post, posts = get_response_seoultechJob(base_url=self.url)
-
-
-            # If there is no new notification on the ITM website
-            if new_post.id == current_newest_post["ID"]:
-                await log_channel.send(f"[{current_time}]|There_is_nothing_new_on_the_website|[{type(self).__name__[19:]}]")
-
-            else:
-                posts = sorted(posts, key=lambda x : (x.date, x.id), reverse=False)
-                for post in posts:
-                    if datetime.strptime(current_newest_post["DATE"], "%Y-%m-%d") <= datetime.strptime(post.date, "%Y-%m-%d") and not current_newest_post["ID"] == post.id:
-                        # If the newest post which was just published is newer than the prior new post
-                        embed = discord.Embed(title=f"[{post.id}] {post.title}...",
-                                              description=f"Link: {post.link}",
-                                              color=discord.Colour.from_rgb(179, 182, 183 ))
-
-                        embed.set_author(name='Seoultech Job')
-                        embed.set_footer(text=f"New Notification by {type(self).__name__[19:]}")
-                        message = await main_channel.send(embed=embed)
-                        check_emoji = settings_toml["DISCORD"]["EMOJIS"]["SAVE"][0]
-                        await message.add_reaction(check_emoji)
-                        await log_channel.send(f"[{current_time}]|The_latest_notification_has_been_updated|['{current_newest_post["ID"]}'->'{post.id}']|[{type(self).__name__[19:]}]")
-
-                        self.update_newest_post(post, settings_path=settings_path, settings_toml=settings_toml)
-                        current_newest_post = {"ID": post.id, "DATE": post.date, "URL":post.link}
-            return True
-
-        except Exception as e:
-            sys.stdout.write(f"Task {type(self).__name__} failed with error: {e}")
-            await log_channel.send(f"[{current_time}]|Task_{type(self).__name__}_failed_with_error:{e}|[{type(self).__name__[19:]}]")
-            return False
-
-    def update_newest_post(self, post: PostJob, settings_path, settings_toml):
-
-        settings_toml["CLIENT"]["NEWEST_POST"]["seoultechJob"]["ID"] = post.id
-        settings_toml["CLIENT"]["NEWEST_POST"]["seoultechJob"]["DATE"] = post.date
-        settings_toml["CLIENT"]["NEWEST_POST"]["seoultechJob"]["URL"] = post.link
-
-        with open(settings_path, 'w', encoding="utf-8") as f:
-            toml.dump(settings_toml, f)
-
-def get_response_seoultechJob(base_url = "https://www.seoultech.ac.kr/service/info/job/"):
-    url = f"{base_url}"
-    response = requests.get(url)
-    if response.status_code != 200:
-        return None  # Handle error
-    else:
-        posts = get_intial_info_seoultechJob(response=response, base_url=base_url)
-        posts_sorted_by_date = sorted(posts, key= lambda x: (x.date, x.id), reverse=True)
-        return posts_sorted_by_date[0], posts_sorted_by_date
-
-def get_intial_info_seoultechJob(response, base_url):
-
-    soup = BeautifulSoup(response.content, 'html.parser')
-    posts = soup.find("tbody").find_all("tr", class_ = "body_tr")
-    posts_info = []
-    # Extract title and link of the latest notice
-    for post in posts:
-        post_id = post.find('td', "dn1")
-        post_title_box = post.find('td', "dn2")
-        title = post_title_box.find("a").text.strip()
-        date = post.find('td', "dn5").text.strip()
-        link = base_url + post_title_box.find("a").attrs['href']
-
-        if ("notice" or "공지") in str(post_id.get_text):
-            formatted_date = str(date).replace('-', '', 2)[-4:]
-            post_id = f"N{formatted_date}"
-        else:
-            post_id = f"P{post_id.text.strip()}"
-
-        post_class = PostJob(post_id=post_id, post_title=title, post_link=link, post_date=date)
-        posts_info.append(post_class)
-    return posts_info
-
-async def get_newest_content_SeoultechJob(id: str, url: str,
-                                          target_channel, log_channel, current_time,
-                                          save_emoji):
-    response = requests.get(url)
-
-    if response.status_code != 200:
-        content = f"ResponseError[status_code: {response.status_code}]"
-        return content
-    else:
         soup = BeautifulSoup(response.content, 'html.parser')
+        rows = soup.find("tbody").find_all("tr", class_="body_tr")
+        posts = []
 
-        notification_container = soup.find("table", "tbl_view").find("tbody")
-        notification_container_list = notification_container.find_all("tr")
-        notification_title = notification_container_list[0].find("td").get_text().strip()
-        notification_author_date = notification_container_list[1].find_all("td")
-        notification_author = notification_author_date[0].get_text().strip()
-        notification_date = notification_author_date[-1].get_text().strip()
-        notification_content = notification_container.find("td", "cont").get_text().strip()
+        for row in rows:
+            try:
+                raw_id = row.find('td', "dn1").get_text(strip=True)
+                title = row.find('td', "dn2").find("a").get_text(strip=True)
+                date = row.find('td', "dn5").get_text(strip=True)
+                href = row.find('td', "dn2").find("a")["href"]
+                link = self.base_url + href
 
-        if 20 < len(notification_title):
-            notification_title = notification_title[:20] + "..."
+                # 공지글 식별 및 ID 생성
+                if "notice" in raw_id or "공지" in raw_id:
+                    numeric = date.replace('-', '')[-4:]
+                    post_id = f"N{numeric}"
+                else:
+                    post_id = f"P{raw_id}"
 
-        if 100 < len(notification_content):
-            notification_content = notification_content[:99] + "\n\n...(see more)"
+                posts.append(PostJob(post_id, title, date, link))
+
+            except Exception:
+                # 개별 행 파싱 실패 시 건너뜀
+                continue
+
+        # (날짜, ID) 기준 내림차순 정렬
+        posts.sort(key=lambda post: (post.date, post.id), reverse=True)
+        newest = posts[0] if posts else None
+        return newest, posts
 
 
-        embed = discord.Embed(title=f"[{id}]\n{notification_title}",
-                              description=notification_content,
-                              url=url,
-                              color=discord.Colour.from_rgb(226, 226, 226),)
+async def get_newest_post_seoultechJob(
+    id: str,
+    url: str,
+    target_channel,
+    log_channel,
+    current_time,
+    save_emoji: str
+):
+    """
+    수동 호출용: 가장 최신의 Job 공지 내용을 임베드로 Discord에 전송
+    """
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
 
-        embed.set_author(name=f"{notification_author} [{notification_date}]")
-        embed.set_footer(text=f"Newest Post in the Seoultech Job")
+        soup = BeautifulSoup(response.content, 'html.parser')
+        container = soup.find("table", "tbl_view").find("tbody")
+        rows = container.find_all("tr")
 
+        # 제목 / 작성자 / 작성일
+        title = rows[0].find("td").get_text(strip=True)
+        author_date = rows[1].find_all("td")
+        author = author_date[0].get_text(strip=True)
+        date = author_date[-1].get_text(strip=True)
+
+        # 본문
+        content = container.find("td", "cont").get_text(strip=True)
+
+        # 길이 제한
+        if len(title) > 20:
+            title = title[:20] + "..."
+        if len(content) > 100:
+            content = content[:99] + "\n\n...(see more)"
+
+        # 임베드 메시지 생성
+        embed = discord.Embed(
+            title=f"[{id}] {title}",
+            description=content,
+            url=url,
+            color=discord.Colour.from_rgb(226, 226, 226)
+        )
+        embed.set_author(name=f"{author} [{date}]")
+        embed.set_footer(text="Newest Post in the Seoultech Job")
+
+        # 전송 및 반응 추가
         message = await target_channel.send(embed=embed)
-        check_emoji = save_emoji
-        await message.add_reaction(check_emoji)
-        await log_channel.send(f"[{current_time}]|The_latest_notification_in_the_Seoultech_Job_has_been_called|[{id}]")
+        await message.add_reaction(save_emoji)
+
+        # 호출 로그
+        await log_channel.send(
+            f"[{current_time}]|The_latest_notification_in_the_Seoultech_Job_has_been_called|[{id}]"
+        )
+
+    except requests.RequestException as e:
+        await log_channel.send(f"[{current_time}]|Failed_to_request_job_page|{e}")
+    except Exception as e:
+        await log_channel.send(f"[{current_time}]|Error_in_get_newest_post_seoultechJob|{e}")
