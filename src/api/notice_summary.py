@@ -1,5 +1,7 @@
 import csv
+import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -7,21 +9,43 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 
 
 KST = timezone(timedelta(hours=9))
-SUMMARY_MODEL = "gpt-5"
+SUMMARY_MODEL = "gpt-4.1-mini"
 SUMMARY_WINDOW_DAYS = 7
 CSV_HEADERS = ["recorded_at", "category", "post_id", "post_date", "title", "link"]
-LLM_OUTPUT_TEMPLATE = """OVERVIEW<<<전체 공지 건수와 가장 비중이 큰 카테고리를 포함한 한 단락 요약>>>
-CATEGORIES<<<아래 분류 체계에 따라 '- [분류] (N건): 핵심 내용' 형식으로 작성. 분류는 학사 / 장학 / 취업·인턴 / 행사·특강 / 모집·신청 / 기타 중에서 선택. 해당 분류에 공지가 없으면 그 줄은 생략. 같은 분류 안에서는 중요 순으로 정렬>>>
-CAUTION<<<마감 임박이거나 놓치면 불이익이 있는 항목 한 줄, 없으면 '없음'>>>"""
-SUMMARY_TEMPLATE = """[최근 7일 공지 요약]
-전체 흐름:
+CATEGORY_LINE_FORMAT = "- [Board Name](Board URL) (N notices): key points in Korean"
+BOARD_LABELS_BY_CATEGORY = {
+    "seoultechITM": "ITM",
+    "seoultechJanghak": "Janghak",
+    "seoultechJob": "Job",
+    "seoultechContest": "Contest",
+    "seoultechNotice": "Notice",
+}
+BOARD_URLS_BY_CATEGORY = {
+    "seoultechITM": "https://itm.seoultech.ac.kr/bachelor_of_information/notice/",
+    "seoultechJanghak": "https://www.seoultech.ac.kr/service/info/janghak/",
+    "seoultechJob": "https://www.seoultech.ac.kr/service/info/job/",
+    "seoultechContest": "https://www.seoultech.ac.kr/service/board/rec/",
+    "seoultechNotice": "https://www.seoultech.ac.kr/service/info/notice",
+}
+LLM_OUTPUT_TEMPLATE = """{
+  "overview": "2-3 sentence summary in Korean",
+  "categories": [
+    "- [e.g. ITM](https://itm.seoultech.ac.kr/bachelor_of_information/notice/) (N notices): key points in Korean",
+    "- [e.g. Janghak](https://www.seoultech.ac.kr/service/info/janghak/) (N notices): key points in Korean"
+  ],
+  "caution": "One caution sentence in Korean. If none, use '없음'"
+}"""
+SUMMARY_TEMPLATE = """## **최근 7일 공지 요약 ({date_range})** 
+
+### **📌 전체 흐름**
 {overview}
 
-카테고리별 핵심:
+### **📂 카테고리별 핵심**
 {categories}
 
-주의 포인트:
-{caution}"""
+### **⚠️ 주의 포인트**
+{caution}
+"""
 
 
 class SummaryGenerationError(Exception):
@@ -69,43 +93,37 @@ def generate_recent_notice_summary(settings_path: str, days: int = SUMMARY_WINDO
         api_key = _load_openai_api_key(settings_path)
         client = OpenAI(api_key=api_key, timeout=90.0, max_retries=2)
         prompt = _build_summary_prompt(recent_rows, days)
-        response = client.responses.create(
-            model=SUMMARY_MODEL,
-            store=False,
-            instructions=(
-                "You summarize university notices in Korean. "
-                "Fill only the requested placeholders and return only the template output."
-            ),
-            input=prompt,
-        )
-        filled_sections = _parse_llm_sections(_extract_output_text(response))
+        response_text = _request_summary_text(client, prompt)
+        sections = _parse_llm_sections(response_text)
+        formatted_categories = "\n".join(sections["categories"]) if sections["categories"] else "- 없음"
         return (
             SUMMARY_TEMPLATE.format(
-                overview=filled_sections["overview"],
-                categories=filled_sections["categories"],
-                caution=filled_sections["caution"],
+                date_range=_build_date_range(recent_rows),
+                overview=sections["overview"],
+                categories=formatted_categories,
+                caution=sections["caution"],
             ),
             len(recent_rows),
         )
     except APITimeoutError as exc:
         raise SummaryGenerationError(
             "OpenAI summary request timed out.",
-            "요약 요청 시간이 초과되었습니다. 관리자에게 문의해주세요.",
+            "요약 요청 시간이 초과되었습니다. 관리자에게 문의해 주세요.",
         ) from exc
     except APIConnectionError as exc:
         raise SummaryGenerationError(
             "OpenAI summary request failed due to a connection error.",
-            "OpenAI 연결에 실패했습니다. 관리자에게 문의해주세요.",
+            "OpenAI 연결에 실패했습니다. 관리자에게 문의해 주세요.",
         ) from exc
     except APIStatusError as exc:
         raise SummaryGenerationError(
             f"OpenAI summary request failed with status {exc.status_code}.",
-            "OpenAI 응답 처리 중 오류가 발생했습니다. 관리자에게 문의해주세요.",
+            "OpenAI 응답 처리 중 오류가 발생했습니다. 관리자에게 문의해 주세요.",
         ) from exc
-    except ValueError as exc:
+    except (ValueError, json.JSONDecodeError) as exc:
         raise SummaryGenerationError(
             f"OpenAI summary response was invalid: {exc}",
-            "요약 결과를 처리하는 중 오류가 발생했습니다. 관리자에게 문의해주세요.",
+            "요약 결과를 처리하는 중 오류가 발생했습니다. 관리자에게 문의해 주세요.",
         ) from exc
 
 
@@ -138,60 +156,140 @@ def load_recent_notice_rows(settings_path: str, days: int = SUMMARY_WINDOW_DAYS)
 
 def _build_summary_prompt(rows, days: int) -> str:
     lines = [
-        f"최근 {days}일 동안 기록된 대학 공지 목록이다.",
-        "아래 출력 템플릿의 빈칸만 채운다고 생각하고 응답하라.",
-        "설명, 서론, 코드블록, 추가 문구 없이 템플릿 결과만 반환하라.",
-        "카테고리별 핵심은 '-'로 시작하는 bullet 여러 줄로 작성하라.",
+        f"This is a list of university notices recorded over the last {days} days.",
+        "Return exactly one JSON object.",
+        "Do not add markdown fences or any text before or after the JSON.",
+        "Write overview and caution in Korean.",
+        "categories must be a JSON string array.",
+        f"Each category item must follow this exact format: '{CATEGORY_LINE_FORMAT}'.",
+        "Group notices only by source board, never by semantic topic.",
+        "Do not merge different boards into one category.",
+        "Use only the board names listed below as category names.",
+        "Use the board list URL for each category, never a notice detail URL.",
+        "Only include boards that actually have notices in the input list.",
         "",
-        "[출력 템플릿]",
-        LLM_OUTPUT_TEMPLATE,
-        "",
-        "[공지 목록]",
+        "[Allowed board names]",
     ]
+
+    for category_key, board_label in BOARD_LABELS_BY_CATEGORY.items():
+        lines.append(f"- {category_key}: {board_label}")
+
+    lines.extend(
+        [
+            "",
+            "[Board URLs]",
+        ]
+    )
+
+    for category_key, board_url in BOARD_URLS_BY_CATEGORY.items():
+        lines.append(f"- {category_key}: {board_url}")
+
+    lines.extend(
+        [
+            "",
+            "[Output format]",
+            LLM_OUTPUT_TEMPLATE,
+            "",
+            "[Notice list]",
+        ]
+    )
 
     for row in rows:
         lines.append(
-            f"- 날짜: {row.get('post_date', '')} | 분류: {row.get('category', '')} | "
-            f"번호: {row.get('post_id', '')} | 제목: {row.get('title', '')} | 링크: {row.get('link', '')}"
+            f"- date: {row.get('post_date', '')} | board_key: {row.get('category', '')} | "
+            f"id: {row.get('post_id', '')} | title: {row.get('title', '')} | link: {row.get('link', '')}"
         )
 
     return "\n".join(lines)
 
 
-def _extract_output_text(response) -> str:
-    output_text = getattr(response, "output_text", "").strip()
-    if output_text:
-        return output_text
+def _request_summary_text(client: OpenAI, prompt: str) -> str:
+    response = client.chat.completions.create(
+        model=SUMMARY_MODEL,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You summarize university notices in Korean. "
+                    "Return exactly one JSON object and nothing else."
+                ),
+            },
+            {
+                "role": "user",
+                "content": prompt,
+            },
+        ],
+        response_format={"type": "json_object"},
+        max_completion_tokens=1400,
+    )
 
-    response_json = response.model_dump()
-    parts = []
-    for item in response_json.get("output", []):
-        if item.get("type") != "message":
-            continue
-        for content in item.get("content", []):
-            if content.get("type") == "output_text":
-                parts.append(content.get("text", ""))
-
-    text = "\n".join(part for part in parts if part).strip()
+    content = response.choices[0].message.content
+    text = _normalize_completion_content(content)
     if not text:
-        raise ValueError("OpenAI response did not include summary text.")
+        finish_reason = response.choices[0].finish_reason
+        raise ValueError(f"OpenAI chat completion did not include summary text. finish_reason={finish_reason}")
     return text
 
 
-def _parse_llm_sections(text: str) -> dict:
-    sections = {}
-    for key in ("OVERVIEW", "CATEGORIES", "CAUTION"):
-        start_token = f"{key}<<<"
-        start_index = text.find(start_token)
-        if start_index == -1:
-            raise ValueError(f"OpenAI response missing {key} section.")
-        start_index += len(start_token)
-        end_index = text.find(">>>", start_index)
-        if end_index == -1:
-            raise ValueError(f"OpenAI response missing closing token for {key}.")
-        sections[key.lower()] = text[start_index:end_index].strip()
+def _normalize_completion_content(content) -> str:
+    if isinstance(content, str):
+        return content.strip()
 
-    return sections
+    if isinstance(content, list):
+        text_parts = []
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "text":
+                text_parts.append(part.get("text", ""))
+            else:
+                part_text = getattr(part, "text", "")
+                if isinstance(part_text, str):
+                    text_parts.append(part_text)
+        return "\n".join(part for part in text_parts if part).strip()
+
+    return ""
+
+
+def _parse_llm_sections(text: str) -> dict:
+    json_text = _extract_json_object(text)
+    payload = json.loads(json_text)
+
+    overview = str(payload.get("overview", "")).strip()
+    caution = str(payload.get("caution", "")).strip()
+    raw_categories = payload.get("categories", [])
+
+    if isinstance(raw_categories, str):
+        categories = [line.strip() for line in raw_categories.splitlines() if line.strip()]
+    elif isinstance(raw_categories, list):
+        categories = [str(item).strip() for item in raw_categories if str(item).strip()]
+    else:
+        categories = []
+
+    if not overview or not caution:
+        raise ValueError("OpenAI JSON response missing overview or caution.")
+
+    return {
+        "overview": overview,
+        "categories": categories,
+        "caution": caution,
+    }
+
+
+def _extract_json_object(text: str) -> str:
+    stripped = text.strip()
+    if stripped.startswith("{") and stripped.endswith("}"):
+        return stripped
+
+    match = re.search(r"\{.*\}", stripped, re.DOTALL)
+    if not match:
+        raise ValueError("OpenAI response did not contain a JSON object.")
+    return match.group(0)
+
+
+def _build_date_range(rows) -> str:
+    dates = sorted(row.get("post_date", "") for row in rows if row.get("post_date"))
+    if not dates:
+        return "unknown - unknown"
+    return f"{dates[0]} - {dates[-1]}"
 
 
 def _load_openai_api_key(settings_path: str) -> str:
