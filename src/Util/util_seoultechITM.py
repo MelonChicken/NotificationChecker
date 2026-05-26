@@ -2,7 +2,7 @@ import requests
 from bs4 import BeautifulSoup
 import discord
 
-from src.Util.notification_checker_base import NotificationCheckerBase
+from Util.notification_checker_base import NotificationCheckerBase
 
 
 class PostITM:
@@ -46,17 +46,17 @@ class SeoultechITMChecker(NotificationCheckerBase):
 
         for row in post_rows:
             try:
-                raw_id = row.find("td", "dn1").get_text(strip=True)
+                raw_id_box = row.find("td", "dn1")
                 title = row.find("td", "body_col_title dn2").find("a").get_text(strip=True)
                 date = row.find("td", "body_col_regdate dn5").get_text(strip=True)
                 link = self.base_url + row.find("td", "body_col_title dn2").find("a")["href"]
 
-                if "notice" in raw_id or "공지" in raw_id:
+                if ("notice" or "공지") in str(raw_id_box.get_text):
                     # 공지글은 날짜 기반 ID 부여
                     numeric_part = date.replace("-", "")[-4:]
                     post_id = f"N{numeric_part}"
                 else:
-                    post_id = f"P{raw_id}"
+                    post_id = f"P{raw_id_box.get_text(strip=True)}"
 
                 posts.append(PostITM(post_id, title, date, link))
 
@@ -68,7 +68,7 @@ class SeoultechITMChecker(NotificationCheckerBase):
         return newest, posts
 
 # get_newest_content 함수 (명령어 수동 호출용)
-async def get_newest_content_SeoultechITM(id: str, url: str, target_channel, log_channel, current_time, save_emoji):
+async def get_newest_content_seoultechITM(id: str, url: str, target_channel, log_channel, current_time, save_emoji):
     try:
         response = requests.get(url)
         if response.status_code != 200:

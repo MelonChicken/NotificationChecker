@@ -5,10 +5,12 @@ import toml
 from discord.ext import commands
 
 
-from src.Util.util_seoultechJob import *
-from src.Util.util_seoultechITM import *
-from src.Util.util_seoultechJanghak import *
-from src.Util.util_seoultechContest import *
+from Util.util_seoultechJob import *
+from Util.util_seoultechITM import *
+from Util.util_seoultechJanghak import *
+from Util.util_seoultechContest import *
+
+from Util.util_seoultechNotice import *
 
 
 class ReactionCog(commands.Cog):
@@ -23,7 +25,7 @@ class ReactionCog(commands.Cog):
         now = datetime.now(kst)
         guild = self.bot.get_guild(payload.guild_id)
         channel = self.bot.get_channel(payload.channel_id)
-        log_ch = self.bot.get_channel(self.bot.settings["DISCORD"]["CHANNEL_ID"]["LOG"])
+        log_channel = self.bot.get_channel(self.bot.settings["DISCORD"]["CHANNEL_ID"]["LOG"])
         if not guild or not channel:
             return
 
@@ -33,18 +35,35 @@ class ReactionCog(commands.Cog):
 
         try:
             msg = await channel.fetch_message(payload.message_id)
-            # 콘텐츠 전송 로직 (텍스트/임베드 모두 handle)
-            await user.send(msg.content or msg.embeds[0])
-            await log_ch.send(f"[{now}]|Saved msg {msg.id} for {user.name}")
-        except discord.Forbidden:
-            await channel.send(f"{user.mention}, DM을 열어주세요.")
-            await log_ch.send(f"[{now}]|DM forbidden for {user.name}")
-        except Exception as e:
-            await log_ch.send(f"[{now}]|Error in reaction handler: {e}")
+        except discord.NotFound:
+            await log_channel.send(f"[{now}]|Failed_to_fetch_message|msg_id={payload.message_id}")
+            return
+
+        # 1) 텍스트가 있으면 content로만 전송
+        if msg.content:
+            try:
+                await user.send(content=msg.content)
+            except discord.Forbidden:
+                await channel.send(f"{user.mention}, DM을 열어주세요.")
+                await log_channel.send(f"[{now}]|DM_forbidden|user={user.name}({user.id})")
+                return
+
+        # 2) 임베드가 있으면 embed 키워드 인자로만 전송 (positional arg 금지!)
+        elif msg.embeds:
+            for embed in msg.embeds:
+                try:
+                    await user.send(embed=embed)
+                except discord.Forbidden:
+                    await channel.send(f"{user.mention}, DM을 열어주세요.")
+                    await log_channel.send(f"[{now}]|DM_forbidden|user={user.name}({user.id})")
+                    return
+
+        # 3) 저장 완료 로그
+        await log_channel.send(f"[{now}]|Saved_message|user={user.name}({user.id})|msg_id={msg.id}")
 
     @commands.command(name="check")
     async def check(self, ctx, website: str = "N0"):
-        """!check [itm|janghak|job|contest] — 수동으로 최신 공지를 가져옵니다."""
+        """!check [itm|janghak|job|contest|...] — 수동으로 최신 공지를 가져옵니다."""
         if website == "N0":
             await ctx.reply(
                 "**사용 가능한 웹사이트**:\n"
@@ -52,6 +71,7 @@ class ReactionCog(commands.Cog):
                 "`!check janghak` — Seoultech Scholarship\n"
                 "`!check job` — Seoultech Job\n"
                 "`!check contest` — Seoultech Contest\n"
+                "`!check notice` — Seoultech Notice\n"
             )
             return
 
@@ -63,10 +83,11 @@ class ReactionCog(commands.Cog):
         now = datetime.now(timezone(timedelta(hours=9)))
 
         dispatch = {
-            "itm": (newest["seoultechITM"], get_newest_content_SeoultechITM),
+            "itm": (newest["seoultechITM"], get_newest_content_seoultechITM),
             "janghak": (newest["seoultechJanghak"], get_newest_content_seoultechJanghak),
             "job": (newest["seoultechJob"], get_newest_content_seoultechJob),
             "contest": (newest["seoultechContest"], get_newest_content_seoultechContest),
+            "notice" : (newest["seoultechNotice"], get_newest_content_seoultechNotice),
         }
 
         if website not in dispatch:

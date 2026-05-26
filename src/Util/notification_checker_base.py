@@ -5,6 +5,8 @@ import toml
 import logging
 from datetime import datetime, timezone, timedelta
 
+from api.notice_summary import append_notice_history
+
 class NotificationCheckerBase:
     def __init__(self, *, category_key: str, base_url: str,
                  settings_path: str, settings_toml: dict,
@@ -41,6 +43,31 @@ class NotificationCheckerBase:
         for post in posts:
             if self._is_post_newer(post, current_newest):
                 # Embed 전송 로직...
+                # 1) Embed 전송
+                embed = discord.Embed(
+                    title=f"[{post.id}] {post.title}",
+                    description=f"Link: {post.link}",
+                    color=self.embed_color
+                )
+                embed.set_author(name=self.embed_author)
+                embed.set_footer(text=f"New Notification by {self.category_key}")
+                message = await self.main_channel.send(embed=embed)
+
+                # 2) 리액션 추가
+                save_emoji = self.settings_toml["DISCORD"]["EMOJIS"]["SAVE"][0]
+                await message.add_reaction(save_emoji)
+
+                # 3) 로그 채널에 업데이트 로그
+                await self.log_channel.send(
+                    f"[{current_time}]|The_latest_notification_has_been_updated|"
+                    f"['{current_newest['ID']}'->'{post.id}']|[{self.category_key}]"
+                )
+                append_notice_history(
+                    settings_path=self.settings_path,
+                    category_key=self.category_key,
+                    post=post,
+                    recorded_at=current_time,
+                )
                 sent = True
                 # 저장 및 최신화
                 self.update_newest_post(post)

@@ -2,7 +2,7 @@ import requests
 from bs4 import BeautifulSoup
 import discord
 
-from src.Util.notification_checker_base import NotificationCheckerBase
+from Util.notification_checker_base import NotificationCheckerBase
 
 
 class PostJanghak:
@@ -52,18 +52,18 @@ class SeoultechJanghakChecker(NotificationCheckerBase):
 
         for row in rows:
             try:
-                raw_id = row.find('td', "dn1").get_text(strip=True)
+                raw_id_box = row.find('td', "dn1")
                 title = row.find('td', "tit dn2").find("a").get_text(strip=True)
                 date = row.find('td', "dn5").get_text(strip=True)
                 href = row.find('td', "tit dn2").find("a")["href"]
                 link = self.base_url + href
 
                 # 공지글 식별 및 ID 생성
-                if "notice" in raw_id or "공지" in raw_id:
+                if ("notice" or "공지") in str(raw_id_box.get_text):
                     numeric = date.replace('-', '')[-4:]
                     post_id = f"N{numeric}"
                 else:
-                    post_id = f"P{raw_id}"
+                    post_id = f"P{raw_id_box.get_text(strip=True)}"
 
                 posts.append(PostJanghak(post_id, title, date, link))
 
@@ -77,7 +77,7 @@ class SeoultechJanghakChecker(NotificationCheckerBase):
         return newest, posts
 
 
-async def get_newest_post_seoultechJanghak(
+async def get_newest_content_seoultechJanghak(
     id: str,
     url: str,
     target_channel,
@@ -89,6 +89,7 @@ async def get_newest_post_seoultechJanghak(
     수동 호출용: 가장 최신의 Janghak 공지 내용을 임베드로 Discord에 전송
     """
     try:
+        print("[test] in th eget newest content seoultechJanghak")
         response = requests.get(url)
         response.raise_for_status()
 

@@ -5,8 +5,8 @@ import toml
 import discord
 from discord.ext import commands
 
-from src.cogs.notifier import NotifierCog
-from src.cogs.reaction import ReactionCog
+from cogs.notifier import NotifierCog
+from cogs.reaction import ReactionCog
 
 
 class DiscordBot(commands.Bot):
