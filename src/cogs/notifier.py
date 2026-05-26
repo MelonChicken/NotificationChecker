@@ -13,8 +13,8 @@ from Util.util_seoultechJanghak import *
 from Util.util_seoultechContest import *
 from Util.util_seoultechNotice import *
 
-from src.Util.util_seoultechNotice import SeoultechNoticeChecker
-from api.notice_summary import generate_recent_notice_summary
+from Util.util_seoultechNotice import SeoultechNoticeChecker
+from api.notice_summary import SummaryGenerationError, generate_recent_notice_summary
 
 CHECKER_CLASSES = [
     SeoultechITMChecker,
@@ -70,6 +70,7 @@ class NotifierCog(commands.Cog):
                 generate_recent_notice_summary,
                 self.bot.settings_path,
             )
+            self.logger.info("Summary generated from %s recent notices", notice_count)
             for index, chunk in enumerate(self._split_message(summary_text)):
                 if index == 0:
                     await ctx.reply(chunk)
@@ -78,9 +79,15 @@ class NotifierCog(commands.Cog):
             await self.log_channel.send(
                 f"[{datetime.now(timezone(timedelta(hours=9)))}]|Summary_generated|count={notice_count}"
             )
+        except SummaryGenerationError as e:
+            self.logger.exception(e.log_message)
+            await ctx.reply(e.user_message)
+            await self.log_channel.send(
+                f"[{datetime.now(timezone(timedelta(hours=9)))}]|Summary_failed|{e.log_message}"
+            )
         except Exception as e:
-            self.logger.exception("Failed to generate summary")
-            await ctx.reply("요약 생성 중 오류가 발생했습니다.")
+            self.logger.exception("Unexpected error while generating summary")
+            await ctx.reply("요약 생성 중 알 수 없는 오류가 발생했습니다. 관리자에게 문의해주세요.")
             await self.log_channel.send(
                 f"[{datetime.now(timezone(timedelta(hours=9)))}]|Summary_failed|{e}"
             )

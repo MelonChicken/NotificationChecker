@@ -3,7 +3,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import requests
+from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 
 
 KST = timezone(timedelta(hours=9))
@@ -14,14 +14,21 @@ LLM_OUTPUT_TEMPLATE = """OVERVIEW<<<전체 공지 건수와 가장 비중이 큰
 CATEGORIES<<<아래 분류 체계에 따라 '- [분류] (N건): 핵심 내용' 형식으로 작성. 분류는 학사 / 장학 / 취업·인턴 / 행사·특강 / 모집·신청 / 기타 중에서 선택. 해당 분류에 공지가 없으면 그 줄은 생략. 같은 분류 안에서는 중요 순으로 정렬>>>
 CAUTION<<<마감 임박이거나 놓치면 불이익이 있는 항목 한 줄, 없으면 '없음'>>>"""
 SUMMARY_TEMPLATE = """[최근 7일 공지 요약]
-📌 전체 흐름
+전체 흐름:
 {overview}
 
-📂 카테고리별 핵심
+카테고리별 핵심:
 {categories}
 
-⚠️ 주의 포인트
+주의 포인트:
 {caution}"""
+
+
+class SummaryGenerationError(Exception):
+    def __init__(self, log_message: str, user_message: str):
+        super().__init__(log_message)
+        self.log_message = log_message
+        self.user_message = user_message
 
 
 def _project_root_from_settings(settings_path: str) -> Path:
@@ -58,35 +65,48 @@ def generate_recent_notice_summary(settings_path: str, days: int = SUMMARY_WINDO
     if not recent_rows:
         return "최근 7일 내 기록된 공지가 없습니다.", 0
 
-    api_key = _load_openai_api_key(settings_path)
-    prompt = _build_summary_prompt(recent_rows, days)
-    response = requests.post(
-        "https://api.openai.com/v1/responses",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": SUMMARY_MODEL,
-            "store": False,
-            "instructions": (
+    try:
+        api_key = _load_openai_api_key(settings_path)
+        client = OpenAI(api_key=api_key, timeout=90.0, max_retries=2)
+        prompt = _build_summary_prompt(recent_rows, days)
+        response = client.responses.create(
+            model=SUMMARY_MODEL,
+            store=False,
+            instructions=(
                 "You summarize university notices in Korean. "
                 "Fill only the requested placeholders and return only the template output."
             ),
-            "input": prompt,
-        },
-        timeout=60,
-    )
-    response.raise_for_status()
-    filled_sections = _parse_llm_sections(_extract_output_text(response.json()))
-    return (
-        SUMMARY_TEMPLATE.format(
-            overview=filled_sections["overview"],
-            categories=filled_sections["categories"],
-            caution=filled_sections["caution"],
-        ),
-        len(recent_rows),
-    )
+            input=prompt,
+        )
+        filled_sections = _parse_llm_sections(_extract_output_text(response))
+        return (
+            SUMMARY_TEMPLATE.format(
+                overview=filled_sections["overview"],
+                categories=filled_sections["categories"],
+                caution=filled_sections["caution"],
+            ),
+            len(recent_rows),
+        )
+    except APITimeoutError as exc:
+        raise SummaryGenerationError(
+            "OpenAI summary request timed out.",
+            "요약 요청 시간이 초과되었습니다. 관리자에게 문의해주세요.",
+        ) from exc
+    except APIConnectionError as exc:
+        raise SummaryGenerationError(
+            "OpenAI summary request failed due to a connection error.",
+            "OpenAI 연결에 실패했습니다. 관리자에게 문의해주세요.",
+        ) from exc
+    except APIStatusError as exc:
+        raise SummaryGenerationError(
+            f"OpenAI summary request failed with status {exc.status_code}.",
+            "OpenAI 응답 처리 중 오류가 발생했습니다. 관리자에게 문의해주세요.",
+        ) from exc
+    except ValueError as exc:
+        raise SummaryGenerationError(
+            f"OpenAI summary response was invalid: {exc}",
+            "요약 결과를 처리하는 중 오류가 발생했습니다. 관리자에게 문의해주세요.",
+        ) from exc
 
 
 def load_recent_notice_rows(settings_path: str, days: int = SUMMARY_WINDOW_DAYS):
@@ -138,7 +158,12 @@ def _build_summary_prompt(rows, days: int) -> str:
     return "\n".join(lines)
 
 
-def _extract_output_text(response_json: dict) -> str:
+def _extract_output_text(response) -> str:
+    output_text = getattr(response, "output_text", "").strip()
+    if output_text:
+        return output_text
+
+    response_json = response.model_dump()
     parts = []
     for item in response_json.get("output", []):
         if item.get("type") != "message":
