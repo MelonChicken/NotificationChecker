@@ -1,8 +1,11 @@
 import logging
+import re
 from datetime import datetime, timezone, timedelta
 import discord
 import toml
 from discord.ext import commands
+
+from Util.notice_identity import format_stable_id_display_tag
 
 
 from Util.util_seoultechJob import *
@@ -52,7 +55,7 @@ class ReactionCog(commands.Cog):
         elif msg.embeds:
             for embed in msg.embeds:
                 try:
-                    await user.send(embed=embed)
+                    await user.send(embed=self._sanitize_embed_for_dm(embed))
                 except discord.Forbidden:
                     await channel.send(f"{user.mention}, DM을 열어주세요.")
                     await log_channel.send(f"[{now}]|DM_forbidden|user={user.name}({user.id})")
@@ -102,3 +105,20 @@ class ReactionCog(commands.Cog):
             current_time=now,
             save_emoji=save_emoji
         )
+
+    def _sanitize_embed_for_dm(self, embed: discord.Embed) -> discord.Embed:
+        copied = embed.copy()
+        copied.title = self._format_legacy_stable_id_title(copied.title)
+        return copied
+
+    def _format_legacy_stable_id_title(self, title: str | None) -> str | None:
+        if not title:
+            return title
+
+        match = re.match(r"^\[(bidx|qidx|profboardidx):([^\]]+)\](.*)$", title)
+        if not match:
+            return title
+
+        stable_id = f"{match.group(1)}:{match.group(2)}"
+        display_tag = format_stable_id_display_tag(stable_id, is_major_notice=False)
+        return f"[{display_tag}]{match.group(3)}"
