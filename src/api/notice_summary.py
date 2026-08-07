@@ -2,16 +2,20 @@ import csv
 import json
 import os
 import re
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 
+from Util.notice_identity import make_stable_id, notice_history_key
+
 
 KST = timezone(timedelta(hours=9))
 SUMMARY_MODEL = "gpt-4.1-mini"
 SUMMARY_WINDOW_DAYS = 7
-CSV_HEADERS = ["recorded_at", "category", "post_id", "post_date", "title", "link"]
+CSV_HEADERS = ["source", "category", "stable_id", "title", "date", "url", "sent_at"]
+LEGACY_CSV_HEADERS = ["recorded_at", "category", "post_id", "post_date", "title", "link"]
 CATEGORY_LINE_FORMAT = "- [Board Name](Board URL) (N notices): key points in Korean"
 BOARD_LABELS_BY_CATEGORY = {
     "seoultechITM": "ITM",
@@ -66,7 +70,24 @@ def get_notice_history_csv_path(settings_path: str) -> Path:
 def append_notice_history(settings_path: str, category_key: str, post, recorded_at: datetime) -> None:
     csv_path = get_notice_history_csv_path(settings_path)
     csv_path.parent.mkdir(parents=True, exist_ok=True)
+    migrate_notice_history(settings_path)
     is_new_file = not csv_path.exists()
+    fieldnames = _read_history_fieldnames(csv_path)
+
+    if fieldnames and fieldnames != CSV_HEADERS:
+        with csv_path.open("a", newline="", encoding="utf-8-sig") as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=LEGACY_CSV_HEADERS)
+            writer.writerow(
+                {
+                    "recorded_at": recorded_at.isoformat(),
+                    "category": category_key,
+                    "post_id": getattr(post, "stable_id", getattr(post, "id", "")),
+                    "post_date": getattr(post, "date", ""),
+                    "title": getattr(post, "title", ""),
+                    "link": getattr(post, "link", ""),
+                }
+            )
+        return
 
     with csv_path.open("a", newline="", encoding="utf-8-sig") as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=CSV_HEADERS)
@@ -74,14 +95,134 @@ def append_notice_history(settings_path: str, category_key: str, post, recorded_
             writer.writeheader()
         writer.writerow(
             {
-                "recorded_at": recorded_at.isoformat(),
+                "source": getattr(post, "source", "seoultech"),
                 "category": category_key,
-                "post_id": getattr(post, "id", ""),
-                "post_date": getattr(post, "date", ""),
+                "stable_id": getattr(
+                    post,
+                    "stable_id",
+                    make_stable_id(
+                        getattr(post, "link", ""),
+                        category_key,
+                        getattr(post, "date", ""),
+                        getattr(post, "title", ""),
+                    ),
+                ),
                 "title": getattr(post, "title", ""),
-                "link": getattr(post, "link", ""),
+                "date": getattr(post, "date", ""),
+                "url": getattr(post, "link", ""),
+                "sent_at": recorded_at.isoformat(),
             }
         )
+
+
+def load_seen_notice_keys(settings_path: str) -> set[tuple[str, str, str]]:
+    csv_path = get_notice_history_csv_path(settings_path)
+    if not csv_path.exists():
+        return set()
+
+    migrate_notice_history(settings_path)
+    seen = set()
+    with csv_path.open("r", newline="", encoding="utf-8-sig") as csv_file:
+        reader = csv.DictReader(csv_file)
+        for row in reader:
+            source = row.get("source") or "seoultech"
+            category = row.get("category", "")
+            stable_id = row.get("stable_id") or make_stable_id(
+                row.get("url") or row.get("link", ""),
+                category,
+                row.get("date") or row.get("post_date", ""),
+                row.get("title", ""),
+            )
+            if category and stable_id:
+                seen.add(notice_history_key(source, category, stable_id))
+
+    return seen
+
+
+def _read_history_fieldnames(csv_path: Path):
+    if not csv_path.exists():
+        return None
+    with csv_path.open("r", newline="", encoding="utf-8-sig") as csv_file:
+        return csv.DictReader(csv_file).fieldnames
+
+
+def migrate_notice_history(settings_path: str) -> bool:
+    csv_path = get_notice_history_csv_path(settings_path)
+    if not csv_path.exists():
+        return False
+
+    with csv_path.open("r", newline="", encoding="utf-8-sig") as csv_file:
+        reader = csv.DictReader(csv_file)
+        if reader.fieldnames == CSV_HEADERS:
+            return False
+        rows = list(reader)
+
+    migrated_rows = []
+    seen = set()
+    for row in rows:
+        category = row.get("category", "")
+        title = _legacy_title(row)
+        date = row.get("date") or row.get("post_date", "")
+        url = _legacy_url(row)
+        stable_id = row.get("stable_id") or make_stable_id(url, category, date, title)
+        source = row.get("source") or "seoultech"
+        key = notice_history_key(source, category, stable_id)
+        if not category or not stable_id or key in seen:
+            continue
+
+        seen.add(key)
+        migrated_rows.append(
+            {
+                "source": source,
+                "category": category,
+                "stable_id": stable_id,
+                "title": title,
+                "date": date,
+                "url": url,
+                "sent_at": row.get("sent_at") or row.get("recorded_at", ""),
+            }
+        )
+
+    with tempfile.NamedTemporaryFile(
+        "w",
+        newline="",
+        encoding="utf-8-sig",
+        dir=csv_path.parent,
+        delete=False,
+    ) as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=CSV_HEADERS)
+        writer.writeheader()
+        writer.writerows(migrated_rows)
+        temp_path = Path(csv_file.name)
+
+    try:
+        temp_path.replace(csv_path)
+    except PermissionError:
+        temp_path.unlink(missing_ok=True)
+        return False
+
+    return True
+
+
+def _legacy_url(row: dict) -> str:
+    url = row.get("url") or row.get("link", "")
+    if isinstance(url, str) and url.startswith(("http://", "https://")):
+        return url
+
+    for value in row.get(None) or []:
+        if isinstance(value, str) and value.startswith(("http://", "https://")):
+            return value
+    return url or ""
+
+
+def _legacy_title(row: dict) -> str:
+    title = row.get("title", "")
+    extras = []
+    for value in row.get(None) or []:
+        if isinstance(value, str) and value.startswith(("http://", "https://")):
+            break
+        extras.append(value)
+    return ",".join([title, *extras]) if extras else title
 
 
 def generate_recent_notice_summary(settings_path: str, days: int = SUMMARY_WINDOW_DAYS) -> tuple[str, int]:
@@ -139,18 +280,30 @@ def load_recent_notice_rows(settings_path: str, days: int = SUMMARY_WINDOW_DAYS)
     with csv_path.open("r", newline="", encoding="utf-8-sig") as csv_file:
         reader = csv.DictReader(csv_file)
         for row in reader:
-            post_date = _parse_post_date(row.get("post_date", ""))
+            post_date = _parse_post_date(row.get("date") or row.get("post_date", ""))
             if post_date is None or post_date < threshold:
                 continue
 
-            dedupe_key = (row.get("category"), row.get("post_id"), row.get("link"))
+            stable_id = row.get("stable_id") or make_stable_id(
+                row.get("url") or row.get("link", ""),
+                row.get("category", ""),
+                row.get("date") or row.get("post_date", ""),
+                row.get("title", ""),
+            )
+            dedupe_key = (row.get("source") or "seoultech", row.get("category"), stable_id)
             if dedupe_key in seen:
                 continue
 
             seen.add(dedupe_key)
             recent_rows.append(row)
 
-    recent_rows.sort(key=lambda row: (row.get("post_date", ""), row.get("category", ""), row.get("post_id", "")))
+    recent_rows.sort(
+        key=lambda row: (
+            row.get("date") or row.get("post_date", ""),
+            row.get("category", ""),
+            row.get("stable_id") or row.get("post_id", ""),
+        )
+    )
     return recent_rows
 
 
@@ -196,8 +349,9 @@ def _build_summary_prompt(rows, days: int) -> str:
 
     for row in rows:
         lines.append(
-            f"- date: {row.get('post_date', '')} | board_key: {row.get('category', '')} | "
-            f"id: {row.get('post_id', '')} | title: {row.get('title', '')} | link: {row.get('link', '')}"
+            f"- date: {row.get('date') or row.get('post_date', '')} | board_key: {row.get('category', '')} | "
+            f"id: {row.get('stable_id') or row.get('post_id', '')} | title: {row.get('title', '')} | "
+            f"link: {row.get('url') or row.get('link', '')}"
         )
 
     return "\n".join(lines)
@@ -286,7 +440,7 @@ def _extract_json_object(text: str) -> str:
 
 
 def _build_date_range(rows) -> str:
-    dates = sorted(row.get("post_date", "") for row in rows if row.get("post_date"))
+    dates = sorted((row.get("date") or row.get("post_date", "")) for row in rows if row.get("date") or row.get("post_date"))
     if not dates:
         return "unknown - unknown"
     return f"{dates[0]} - {dates[-1]}"

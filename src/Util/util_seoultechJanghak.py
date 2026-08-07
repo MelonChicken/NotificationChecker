@@ -1,31 +1,14 @@
+from urllib.parse import urljoin
+
+import discord
 import requests
 from bs4 import BeautifulSoup
-import discord
 
 from Util.notification_checker_base import NotificationCheckerBase
+from Util.notice_identity import Notice, is_major_notice_text, make_stable_id
 
-
-class PostJanghak:
-    def __init__(self, post_id = "UNK", post_title="title",post_date = "YYYY-MM-DD", post_link = "link"):
-        self.id = post_id
-        self.title = post_title
-        self.link = post_link
-        self.date = post_date
-        self.content = "unknown"
-
-    def add_content(self):
-        response = requests.get(self.link)
-        if response.status_code != 200:
-            self.content = f"ResponseError[status_code: {response.status_code}]"
-        soup = BeautifulSoup(response.content, 'html.parser')
-        content_box = soup.find("td ", "cont").get_text().strip()
-        self.content = content_box
 
 class SeoultechJanghakChecker(NotificationCheckerBase):
-    """
-    NotificationCheckerBase를 상속하여
-    서울과기대 장학 공지 전용으로 크롤링·알림 기능을 제공하는 클래스
-    """
     def __init__(self, settings_path, settings_toml, main_channel, log_channel):
         super().__init__(
             category_key="seoultechJanghak",
@@ -35,44 +18,53 @@ class SeoultechJanghakChecker(NotificationCheckerBase):
             main_channel=main_channel,
             log_channel=log_channel,
             embed_color=discord.Colour.from_rgb(226, 226, 226),
-            embed_author="Seoultech Janghak"
+            embed_author="Seoultech Janghak",
         )
 
-    def get_latest_posts(self):
-        """
-        장학 공지 목록을 파싱하여 가장 최신 Post 객체와 전체 리스트를 반환
-        """
-        response = requests.get(self.base_url)
+    def get_posts_page(self, page: int):
+        response = requests.get(self.build_page_url(page))
         if response.status_code != 200:
-            return None, []
+            return None
 
-        soup = BeautifulSoup(response.content, 'html.parser')
-        rows = soup.find("tbody").find_all("tr", class_="body_tr")
+        soup = BeautifulSoup(response.content, "html.parser")
+        tbody = soup.find("tbody")
+        if tbody is None:
+            return []
+
         posts = []
-
-        for row in rows:
+        for row in tbody.find_all("tr", class_="body_tr"):
             try:
-                raw_id_box = row.find('td', "dn1")
-                title = row.find('td', "tit dn2").find("a").get_text(strip=True)
-                date = row.find('td', "dn5").get_text(strip=True)
-                href = row.find('td', "tit dn2").find("a")["href"]
-                link = self.base_url + href
+                raw_id_box = row.find("td", "dn1")
+                title_link = row.find("td", "tit dn2").find("a")
+                raw_id = raw_id_box.get_text(strip=True)
+                title = title_link.get_text(strip=True)
+                date = row.find("td", "dn5").get_text(strip=True)
+                link = urljoin(self.base_url, title_link["href"])
+                is_major = is_major_notice_text(raw_id)
+                legacy_id = f"N{date.replace('-', '')[-4:]}" if is_major else f"P{raw_id}"
 
-                # 공지글 식별 및 ID 생성
-                if ("notice" or "공지") in str(raw_id_box.get_text):
-                    numeric = date.replace('-', '')[-4:]
-                    post_id = f"N{numeric}"
-                else:
-                    post_id = f"P{raw_id_box.get_text(strip=True)}"
-
-                posts.append(PostJanghak(post_id, title, date, link))
-
+                posts.append(
+                    Notice(
+                        source="seoultech",
+                        category=self.category_key,
+                        stable_id=make_stable_id(link, self.category_key, date, title),
+                        title=title,
+                        date=date,
+                        url=link,
+                        is_major_notice=is_major,
+                        legacy_id=legacy_id,
+                    )
+                )
             except Exception:
-                # 개별 행 파싱 오류 시 건너뜀
                 continue
 
-        # (날짜, ID) 기준 내림차순 정렬
-        posts.sort(key=lambda post: (post.date, post.id), reverse=True)
+        posts.sort(key=lambda post: (post.date, post.stable_id), reverse=True)
+        return posts
+
+    def get_latest_posts(self):
+        posts = self.get_posts_page(1)
+        if posts is None:
+            return None, []
         newest = posts[0] if posts else None
         return newest, posts
 
@@ -83,50 +75,38 @@ async def get_newest_content_seoultechJanghak(
     target_channel,
     log_channel,
     current_time,
-    save_emoji: str
+    save_emoji: str,
 ):
-    """
-    수동 호출용: 가장 최신의 Janghak 공지 내용을 임베드로 Discord에 전송
-    """
     try:
-        print("[test] in th eget newest content seoultechJanghak")
         response = requests.get(url)
         response.raise_for_status()
 
-        soup = BeautifulSoup(response.content, 'html.parser')
+        soup = BeautifulSoup(response.content, "html.parser")
         container = soup.find("tbody")
         rows = container.find_all("tr")
 
-        # 제목 / 작성자 / 작성일
         title = rows[0].find("td").get_text(strip=True)
         author_date = rows[1].find_all("td")
         author = author_date[0].get_text(strip=True)
         date = author_date[-1].get_text(strip=True)
-
-        # 본문
         content = container.find("td", {"class": "cont"}).get_text(strip=True)
 
-        # 길이 제한
         if len(title) > 20:
             title = title[:20] + "..."
         if len(content) > 100:
             content = content[:99] + "\n\n...(see more)"
 
-        # 임베드 메시지 생성
         embed = discord.Embed(
             title=f"[{id}] {title}",
             description=content,
             url=url,
-            color=discord.Colour.from_rgb(226, 226, 226)
+            color=discord.Colour.from_rgb(226, 226, 226),
         )
         embed.set_author(name=f"{author} [{date}]")
         embed.set_footer(text="Newest Post in the Seoultech Janghak")
 
-        # 전송 및 반응 추가
         message = await target_channel.send(embed=embed)
         await message.add_reaction(save_emoji)
-
-        # 호출 로그
         await log_channel.send(
             f"[{current_time}]|The_latest_notification_in_the_Seoultech_Janghak_has_been_called|[{id}]"
         )
