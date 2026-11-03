@@ -5,6 +5,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from Util.notification_checker_base import NotificationCheckerBase
+from Util.seoultech_http import get_school_page
 from Util.notice_identity import Notice, is_major_notice_text, make_stable_id
 
 
@@ -22,7 +23,7 @@ class SeoultechContestChecker(NotificationCheckerBase):
         )
 
     def get_posts_page(self, page: int):
-        response = requests.get(self.build_page_url(page))
+        response = get_school_page(self.build_page_url(page))
         if response.status_code != 200:
             return None
 
@@ -78,7 +79,7 @@ async def get_newest_content_seoultechContest(
     save_emoji: str,
 ):
     try:
-        response = requests.get(url)
+        response = get_school_page(url)
         response.raise_for_status()
 
         soup = BeautifulSoup(response.content, "html.parser")

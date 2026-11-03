@@ -1,10 +1,10 @@
 from urllib.parse import urljoin
 
 import discord
-import requests
 from bs4 import BeautifulSoup
 
 from Util.notification_checker_base import NotificationCheckerBase
+from Util.seoultech_http import get_school_page
 from Util.notice_identity import Notice, is_major_notice_text, make_stable_id
 
 
@@ -22,7 +22,7 @@ class SeoultechITMChecker(NotificationCheckerBase):
         )
 
     def get_posts_page(self, page: int):
-        response = requests.get(self.build_page_url(page))
+        response = get_school_page(self.build_page_url(page))
         if response.status_code != 200:
             return None
 
@@ -71,7 +71,7 @@ class SeoultechITMChecker(NotificationCheckerBase):
 
 async def get_newest_content_seoultechITM(id: str, url: str, target_channel, log_channel, current_time, save_emoji):
     try:
-        response = requests.get(url)
+        response = get_school_page(url)
         if response.status_code != 200:
             raise ValueError(f"Failed to load content: {response.status_code}")
 
